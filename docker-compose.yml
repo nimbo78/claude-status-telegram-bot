@@ -1,0 +1,12 @@
+services:
+  claude-status-bot:
+    build: .
+    container_name: claude-status-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - bot-data:/data
+
+volumes:
+  bot-data:
