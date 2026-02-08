@@ -100,22 +100,23 @@ STATE_FILE=./state.json python bot.py
 
 ## 🏗️ How It Works
 
-```
-┌─────────────┐    every 5 min    ┌──────────────────┐
-│   Bot Loop  │ ───── GET ──────▸ │ status.claude.com │
-│  (polling)  │ ◂──── JSON ────── │ /api/v2/summary   │
-└──────┬──────┘                   └──────────────────┘
-       │
-       │ compare with saved state
-       │
-       ▼
-┌──────────────┐   send/edit    ┌──────────┐
-│ Change found │ ─────────────▸ │ Telegram │
-│  (diff)      │                │   Bot API│
-└──────┬───────┘                └──────────┘
-       │
-       ▼
-  💾 state.json
+```mermaid
+flowchart LR
+    A["🔄 Bot Loop\n(every 5 min)"] -->|GET /api/v2/summary.json| B["🌐 status.claude.com"]
+    B -->|JSON response| A
+    A -->|compare with\nsaved state| C{"🔍 Change\ndetected?"}
+    C -->|Yes| D["📨 Telegram Bot API\nsend / edit message"]
+    C -->|No| E["😴 Sleep 5 min"]
+    D --> F["💾 state.json\nupdate & persist"]
+    E --> A
+    F --> E
+
+    style A fill:#7c3aed,color:#fff,stroke:#5b21b6
+    style B fill:#2563eb,color:#fff,stroke:#1d4ed8
+    style C fill:#f59e0b,color:#fff,stroke:#d97706
+    style D fill:#0ea5e9,color:#fff,stroke:#0284c7
+    style F fill:#10b981,color:#fff,stroke:#059669
+    style E fill:#6b7280,color:#fff,stroke:#4b5563
 ```
 
 The bot uses a single API endpoint (`/api/v2/summary.json`) — unauthenticated, no rate limit — which returns everything: overall status, components, incidents with updates, and scheduled maintenances.
