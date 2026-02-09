@@ -1,4 +1,5 @@
-"""Telegram notification sender with message editing for incident updates."""
+"""Telegram notification sender with message editing for incident updates.
+Supports multiple chat IDs — sends to all configured chats."""
 
 import logging
 from typing import Optional
@@ -56,57 +57,60 @@ def _get_bot() -> telegram.Bot:
     return telegram.Bot(token=config.TELEGRAM_BOT_TOKEN)
 
 
-async def _send(text: str) -> Optional[int]:
-    """Send message, return message_id."""
-    if not config.TELEGRAM_BOT_TOKEN or not config.TELEGRAM_CHAT_ID:
+async def _send(text: str) -> dict[str, int]:
+    """Send message to all configured chats. Returns {chat_id: message_id}."""
+    if not config.TELEGRAM_BOT_TOKEN or not config.TELEGRAM_CHAT_IDS:
         logger.warning("Telegram not configured, skipping")
-        return None
-    try:
-        bot = _get_bot()
-        msg = await bot.send_message(
-            chat_id=config.TELEGRAM_CHAT_ID,
-            text=text,
-            parse_mode="MarkdownV2",
-            disable_web_page_preview=True,
-        )
-        logger.info("Sent message %d", msg.message_id)
-        return msg.message_id
-    except Exception:
-        logger.exception("Failed to send Telegram message")
-        return None
+        return {}
+    bot = _get_bot()
+    result = {}
+    for chat_id in config.TELEGRAM_CHAT_IDS:
+        try:
+            msg = await bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                parse_mode="MarkdownV2",
+                disable_web_page_preview=True,
+            )
+            result[chat_id] = msg.message_id
+            logger.info("Sent message %d to %s", msg.message_id, chat_id)
+        except Exception:
+            logger.exception("Failed to send to %s", chat_id)
+    return result
 
 
-async def _edit(message_id: int, text: str) -> bool:
-    """Edit existing message. Returns True on success."""
-    if not config.TELEGRAM_BOT_TOKEN or not config.TELEGRAM_CHAT_ID:
+async def _edit(message_ids: dict[str, int], text: str) -> bool:
+    """Edit message in all chats. Returns True if at least one succeeded."""
+    if not config.TELEGRAM_BOT_TOKEN:
         return False
-    try:
-        bot = _get_bot()
-        await bot.edit_message_text(
-            chat_id=config.TELEGRAM_CHAT_ID,
-            message_id=message_id,
-            text=text,
-            parse_mode="MarkdownV2",
-            disable_web_page_preview=True,
-        )
-        logger.info("Edited message %d", message_id)
-        return True
-    except telegram.error.BadRequest as e:
-        if "message is not modified" in str(e).lower():
-            logger.debug("Message %d unchanged, skip", message_id)
-            return True
-        logger.exception("Failed to edit message %d", message_id)
-        return False
-    except Exception:
-        logger.exception("Failed to edit message %d", message_id)
-        return False
+    bot = _get_bot()
+    any_success = False
+    for chat_id, msg_id in message_ids.items():
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=msg_id,
+                text=text,
+                parse_mode="MarkdownV2",
+                disable_web_page_preview=True,
+            )
+            logger.info("Edited message %d in %s", msg_id, chat_id)
+            any_success = True
+        except telegram.error.BadRequest as e:
+            if "message is not modified" in str(e).lower():
+                any_success = True
+            else:
+                logger.exception("Failed to edit message %d in %s", msg_id, chat_id)
+        except Exception:
+            logger.exception("Failed to edit message %d in %s", msg_id, chat_id)
+    return any_success
 
 
 def build_incident_message(
     name: str, status: str, impact: str, shortlink: str,
-    updates: list[tuple[str, str, str]],  # [(status, body, created_at), ...]
+    updates: list[tuple[str, str, str]],
 ) -> str:
-    """Build a full incident message with all updates (for sending or editing)."""
+    """Build a full incident message with all updates."""
     resolved = status in ("resolved", "completed", "postmortem")
     header_emoji = "✅" if resolved else "🚨"
     header_label = "Resolved" if resolved else "Incident"
@@ -122,10 +126,8 @@ def build_incident_message(
 
     if updates:
         parts.append(f"\n{'─' * 20}\n")
-        # Updates come newest-first from API; show chronologically (oldest first)
         for u_status, u_body, u_time in reversed(updates):
             u_emoji = INCIDENT_STATUS_EMOJI.get(u_status, "ℹ️")
-            # Show just time portion: "2025-02-08T14:30:00Z" -> "14:30"
             time_short = u_time[11:16] if len(u_time) > 16 else u_time
             parts.append(f"\n{u_emoji} *{_esc(time_short)}* — {_esc(_format_status(u_status))}")
             if u_body:
@@ -141,20 +143,20 @@ def build_incident_message(
 async def send_incident(
     name: str, status: str, impact: str, shortlink: str,
     updates: list[tuple[str, str, str]],
-) -> Optional[int]:
-    """Send new incident message, return message_id."""
+) -> dict[str, int]:
+    """Send new incident message. Returns {chat_id: message_id}."""
     text = build_incident_message(name, status, impact, shortlink, updates)
     return await _send(text)
 
 
 async def edit_incident(
-    message_id: int,
+    message_ids: dict[str, int],
     name: str, status: str, impact: str, shortlink: str,
     updates: list[tuple[str, str, str]],
 ) -> bool:
-    """Edit existing incident message with updated info."""
+    """Edit existing incident message in all chats."""
     text = build_incident_message(name, status, impact, shortlink, updates)
-    return await _edit(message_id, text)
+    return await _edit(message_ids, text)
 
 
 async def notify_status_change(old_indicator: str, new_indicator: str, description: str):

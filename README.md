@@ -86,7 +86,7 @@ STATE_FILE=./state.json python bot.py
 | Variable | Default | Description |
 |:---------|:--------|:------------|
 | `TELEGRAM_BOT_TOKEN` | — | 🔑 Bot token from @BotFather |
-| `TELEGRAM_CHAT_ID` | — | 💬 Your user / group / channel ID |
+| `TELEGRAM_CHAT_ID` | — | 💬 Chat ID(s), comma-separated for multiple |
 | `POLL_INTERVAL` | `300` | ⏱️ Seconds between checks (5 min) |
 | `STATUSPAGE_BASE_URL` | `https://status.claude.com` | 🌐 Statuspage URL |
 | `STATE_FILE` | `/data/state.json` | 💾 State persistence path |
@@ -97,6 +97,24 @@ STATE_FILE=./state.json python bot.py
 1. Create a Telegram channel
 2. Add your bot as **admin**
 3. Set `TELEGRAM_CHAT_ID` to `@channel_name` (public) or `-100xxxxx` (private)
+
+## 👥 Multiple Destinations
+
+Send to several chats at once — comma-separated:
+
+```env
+TELEGRAM_CHAT_ID=-1003752855916,123456789,@my_channel
+```
+
+Works with any mix of user IDs, group IDs, and channel usernames.
+
+## 📱 Commands
+
+| Command | Description |
+|:--------|:------------|
+| `/status` | 📊 Show current Claude status, components & active incidents |
+
+Send `/status` to the bot in a private chat anytime to get an instant status check.
 
 ## 🏗️ How It Works
 
