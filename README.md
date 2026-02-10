@@ -42,9 +42,14 @@ Message [@userinfobot](https://t.me/userinfobot) → it replies with your **ID**
 
 ### 3. Deploy
 
+**Option A: Using pre-built image (recommended)**
+
+No need to clone the repo or build anything! Just download the config files:
+
 ```bash
-git clone https://github.com/nimbo78/claude-status-telegram-bot.git
-cd claude-status-telegram-bot
+mkdir -p ~/claude-status-bot && cd ~/claude-status-bot
+curl -O https://raw.githubusercontent.com/nimbo78/claude-status-telegram-bot/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/nimbo78/claude-status-telegram-bot/main/.env.example
 cp .env.example .env
 ```
 
@@ -54,20 +59,35 @@ TELEGRAM_BOT_TOKEN=123456:ABC-DEF1234ghIkl-zyx57W2v
 TELEGRAM_CHAT_ID=987654321
 ```
 
+Start the bot:
 ```bash
+docker compose pull
 docker compose up -d
+```
+
+**Option B: Build locally**
+
+```bash
+git clone https://github.com/nimbo78/claude-status-telegram-bot.git
+cd claude-status-telegram-bot
+cp .env.example .env
+# Edit .env with your credentials
+docker compose up -d --build
 ```
 
 ✅ That's it! You'll get a startup message confirming everything works.
 
+> 📖 See [DEPLOY.md](DEPLOY.md) for detailed deployment guide and troubleshooting.
+
 ## 🐳 Docker Commands
 
 ```bash
-docker compose up -d          # start
-docker compose logs -f        # follow logs
-docker compose restart        # restart
-docker compose down           # stop
-docker compose up -d --build  # rebuild after code changes
+docker compose up -d                    # start
+docker compose logs -f                  # follow logs
+docker compose restart                  # restart
+docker compose down                     # stop
+docker compose pull && docker compose up -d  # update to latest image
+docker compose up -d --build            # rebuild from source (if building locally)
 ```
 
 ## 🖥️ Run Without Docker

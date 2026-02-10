@@ -182,6 +182,67 @@ async def notify_component_change(name: str, old_status: str, new_status: str):
     await _send(text)
 
 
+def build_component_status_message(components: list[tuple[str, str, str]]) -> str:
+    """Build component status message showing all components.
+
+    Args:
+        components: List of (component_id, name, status) tuples
+
+    Returns:
+        Formatted message text in MarkdownV2
+    """
+    non_operational = [c for c in components if c[2] != "operational"]
+
+    if not non_operational:
+        header = "🟢 *All Components Operational*\n"
+    else:
+        header = f"⚠️ *Component Status* ({len(non_operational)} affected)\n"
+
+    parts = [header]
+
+    # Group by status
+    status_groups = {}
+    for comp_id, name, status in components:
+        if status not in status_groups:
+            status_groups[status] = []
+        status_groups[status].append(name)
+
+    # Show problems first, then operational
+    status_order = ["major_outage", "partial_outage", "degraded_performance",
+                    "under_maintenance", "operational"]
+
+    for status in status_order:
+        if status not in status_groups:
+            continue
+        emoji = COMPONENT_STATUS_EMOJI.get(status, "⚪")
+        status_label = _format_status(status)
+        parts.append(f"\n{emoji} *{_esc(status_label)}*")
+        for name in sorted(status_groups[status]):
+            parts.append(f"\n  • {_esc(name)}")
+
+    return "\n".join(parts)
+
+
+async def send_component_status(components: list[tuple[str, str, str]]) -> dict:
+    """Send component status message to all chats.
+
+    Returns:
+        Dict mapping chat_id to message_id for each sent message
+    """
+    text = build_component_status_message(components)
+    return await _send(text)
+
+
+async def edit_component_status(message_ids: dict, components: list[tuple[str, str, str]]) -> bool:
+    """Edit existing component status message in all chats.
+
+    Returns:
+        True if at least one edit succeeded
+    """
+    text = build_component_status_message(components)
+    return await _edit(message_ids, text)
+
+
 async def notify_startup(indicator: str, components: list[tuple[str, str]]):
     emoji = INDICATOR_EMOJI.get(indicator, "⚪")
     lines = [

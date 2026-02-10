@@ -77,6 +77,16 @@ async def process_summary(summary: statuspage.StatusSummary, state: dict) -> dic
             i.id: [u.id for u in i.incident_updates] for i in summary.incidents
         }
         state["incident_statuses"] = {i.id: i.status for i in summary.incidents}
+
+        # Create component status message if any component is non-operational
+        component_list_full = [(c.id, c.name, c.status) for c in summary.components]
+        has_non_operational = any(c.status != "operational" for c in summary.components)
+        if has_non_operational:
+            msg_ids = await notifier.send_component_status(component_list_full)
+            if msg_ids:
+                state["component_message_ids"] = msg_ids
+                logger.info("Created component status message at startup in %d chats", len(msg_ids))
+
         return state
 
     # Overall status change
@@ -86,12 +96,37 @@ async def process_summary(summary: statuspage.StatusSummary, state: dict) -> dic
         )
         state["indicator"] = summary.indicator
 
-    # Component status changes
+    # Component status changes - track if anything changed
+    component_changed = False
     for comp in summary.components:
         old_status = state["components"].get(comp.id)
         if old_status and old_status != comp.status:
-            await notifier.notify_component_change(comp.name, old_status, comp.status)
+            component_changed = True
+            logger.info("Component %s: %s -> %s", comp.name, old_status, comp.status)
         state["components"][comp.id] = comp.status
+
+    # Update component status message if any component changed
+    if component_changed:
+        component_list = [(c.id, c.name, c.status) for c in summary.components]
+        has_non_operational = any(c.status != "operational" for c in summary.components)
+        has_message_ids = bool(state.get("component_message_ids"))
+
+        if has_message_ids:
+            # Edit existing message
+            success = await notifier.edit_component_status(
+                state["component_message_ids"], component_list
+            )
+            if not success:
+                # Edit failed - send new message
+                new_msg_ids = await notifier.send_component_status(component_list)
+                if new_msg_ids:
+                    state["component_message_ids"] = new_msg_ids
+        elif has_non_operational:
+            # No message yet but components are down - create message
+            msg_ids = await notifier.send_component_status(component_list)
+            if msg_ids:
+                state["component_message_ids"] = msg_ids
+                logger.info("Created component status message in %d chats", len(msg_ids))
 
     # Incidents
     known_ids = set(state["incident_ids"])

@@ -8,7 +8,20 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
 # Multiple chat IDs supported: comma-separated
 _raw_chat_ids = os.getenv("TELEGRAM_CHAT_ID", "")
-TELEGRAM_CHAT_IDS = [cid.strip() for cid in _raw_chat_ids.split(",") if cid.strip()]
+TELEGRAM_CHAT_IDS = []
+for cid in _raw_chat_ids.split(","):
+    cid = cid.strip()
+    if cid:
+        if cid.startswith("@"):
+            # Channel username - keep as string
+            TELEGRAM_CHAT_IDS.append(cid)
+        else:
+            # Numeric ID - convert to integer
+            try:
+                TELEGRAM_CHAT_IDS.append(int(cid))
+            except ValueError:
+                # Fallback: keep as string if conversion fails
+                TELEGRAM_CHAT_IDS.append(cid)
 
 # Statuspage
 STATUSPAGE_BASE_URL = os.getenv(
