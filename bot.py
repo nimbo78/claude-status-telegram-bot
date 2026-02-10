@@ -30,26 +30,46 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     emoji = notifier.INDICATOR_EMOJI.get(summary.indicator, "⚪")
-    lines = [f"{emoji} *Overall: {notifier._esc(notifier._format_status(summary.indicator))}*\n"]
+    status_text = notifier._format_status(summary.indicator)
 
-    lines.append("\n*Components:*")
+    # Compact header with status
+    lines = [f"{emoji} *Claude Status: {notifier._esc(status_text)}*\n"]
+
+    # Group components compactly
+    operational = []
+    non_operational = []
     for c in summary.components:
-        c_emoji = notifier.COMPONENT_STATUS_EMOJI.get(c.status, "⚪")
-        lines.append(f"\n{c_emoji} {notifier._esc(c.name)}")
+        if c.status == "operational":
+            operational.append(c.name)
+        else:
+            c_emoji = notifier.COMPONENT_STATUS_EMOJI.get(c.status, "⚪")
+            non_operational.append(f"{c_emoji} {notifier._esc(c.name)}")
 
+    # Show non-operational first (if any)
+    if non_operational:
+        lines.append("*⚠️ Issues:*")
+        lines.extend(non_operational)
+        lines.append("")
+
+    # Show operational services in compact list
+    if operational:
+        lines.append("*Services:*")
+        lines.append("✓ " + notifier._esc(" • ".join(operational)))
+
+    # Incidents section
     if summary.incidents:
-        lines.append(f"\n\n🚨 *Active incidents: {len(summary.incidents)}*")
+        lines.append(f"\n🚨 *{len(summary.incidents)} Active Incident{'s' if len(summary.incidents) > 1 else ''}*")
         for inc in summary.incidents:
             i_emoji = notifier.INCIDENT_STATUS_EMOJI.get(inc.status, "⚠️")
-            lines.append(f"\n{i_emoji} {notifier._esc(inc.name)}")
-            if inc.incident_updates:
+            lines.append(f"{i_emoji} {notifier._esc(inc.name)}")
+            if inc.incident_updates and inc.incident_updates[0].body:
                 latest = inc.incident_updates[0]
-                if latest.body:
-                    lines.append(f"\n_{notifier._esc(latest.body)}_")
+                body_short = latest.body[:100] + "..." if len(latest.body) > 100 else latest.body
+                lines.append(f"  _{notifier._esc(body_short)}_")
     else:
-        lines.append("\n\n✅ No active incidents")
+        lines.append("\n✅ No active incidents")
 
-    lines.append(f"\n\n[status\\.claude\\.com](https://status.claude.com)")
+    lines.append(f"\n[View Details →](https://status\\.claude\\.com)")
 
     await update.message.reply_text(
         "\n".join(lines),

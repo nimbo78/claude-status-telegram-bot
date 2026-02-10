@@ -118,24 +118,24 @@ def build_incident_message(
     s_emoji = INCIDENT_STATUS_EMOJI.get(status, "⚠️")
     i_emoji = INDICATOR_EMOJI.get(impact, "⚪")
 
+    # Compact header with status and impact on same line
     parts = [
-        f"{header_emoji} *{_esc(header_label)}: {_esc(name)}*\n",
-        f"\n{s_emoji} Status: {_esc(_format_status(status))}",
-        f"\n{i_emoji} Impact: {_esc(_format_status(impact))}\n",
+        f"{header_emoji} *{_esc(header_label)}: {_esc(name)}*",
+        f"{s_emoji} {_esc(_format_status(status))} • {i_emoji} {_esc(_format_status(impact))} impact",
     ]
 
     if updates:
-        parts.append(f"\n{'─' * 20}\n")
+        parts.append(f"\n{'─' * 20}")
         for u_status, u_body, u_time in reversed(updates):
             u_emoji = INCIDENT_STATUS_EMOJI.get(u_status, "ℹ️")
             time_short = u_time[11:16] if len(u_time) > 16 else u_time
-            parts.append(f"\n{u_emoji} *{_esc(time_short)}* — {_esc(_format_status(u_status))}")
+            parts.append(f"{u_emoji} *{_esc(time_short)}* — {_esc(_format_status(u_status))}")
             if u_body:
-                parts.append(f"\n{_esc(u_body)}")
+                parts.append(f"  {_esc(u_body)}")
             parts.append("")
 
     if shortlink:
-        parts.append(f"\n[View on status page]({_esc(shortlink)})")
+        parts.append(f"[View Details →]({_esc(shortlink)})")
 
     return "\n".join(parts)
 
@@ -193,12 +193,11 @@ def build_component_status_message(components: list[tuple[str, str, str]]) -> st
     """
     non_operational = [c for c in components if c[2] != "operational"]
 
+    # Compact header
     if not non_operational:
-        header = "🟢 *All Components Operational*\n"
+        parts = ["🟢 *All Systems Operational*"]
     else:
-        header = f"⚠️ *Component Status* ({len(non_operational)} affected)\n"
-
-    parts = [header]
+        parts = [f"⚠️ *{len(non_operational)} Service{'s' if len(non_operational) > 1 else ''} Affected*"]
 
     # Group by status
     status_groups = {}
@@ -214,11 +213,20 @@ def build_component_status_message(components: list[tuple[str, str, str]]) -> st
     for status in status_order:
         if status not in status_groups:
             continue
+
         emoji = COMPONENT_STATUS_EMOJI.get(status, "⚪")
         status_label = _format_status(status)
-        parts.append(f"\n{emoji} *{_esc(status_label)}*")
-        for name in sorted(status_groups[status]):
-            parts.append(f"\n  • {_esc(name)}")
+        names = sorted(status_groups[status])
+
+        # Compact format for operational, detailed for problems
+        if status == "operational" and len(names) > 2:
+            # Operational services in one line
+            parts.append(f"\n{emoji} *{_esc(status_label)}:* {_esc(' • '.join(names))}")
+        else:
+            # Problems shown separately for clarity
+            parts.append(f"\n{emoji} *{_esc(status_label)}*")
+            for name in names:
+                parts.append(f"  • {_esc(name)}")
 
     return "\n".join(parts)
 
