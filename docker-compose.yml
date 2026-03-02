@@ -2,8 +2,8 @@ services:
   claude-status-bot:
     # Use pre-built image from GitHub Container Registry
     # To build locally instead, comment out 'image:' and uncomment 'build: .'
-    image: ghcr.io/${GITHUB_REPOSITORY:-nimbo78/claude-status-telegram-bot}:main
-    # build: .
+    # image: ghcr.io/${GITHUB_REPOSITORY:-nimbo78/claude-status-telegram-bot}:main
+    build: .
     container_name: claude-status-bot
     restart: unless-stopped
     env_file:
