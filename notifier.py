@@ -2,6 +2,7 @@
 Supports multiple chat IDs — sends to all configured chats."""
 
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
 import telegram
@@ -159,27 +160,78 @@ async def edit_incident(
     return await _edit(message_ids, text)
 
 
-async def notify_status_change(old_indicator: str, new_indicator: str, description: str):
-    emoji_old = INDICATOR_EMOJI.get(old_indicator, "⚪")
-    emoji_new = INDICATOR_EMOJI.get(new_indicator, "⚪")
-    text = (
-        f"⚡ *Overall Status Changed*\n\n"
-        f"{emoji_old} {_esc(_format_status(old_indicator or 'unknown'))} "
-        f"→ {emoji_new} {_esc(_format_status(new_indicator))}\n\n"
-        f"_{_esc(description)}_"
-    )
-    await _send(text)
+def build_pinned_status_message(
+    indicator: str, description: str,
+    components: list[tuple[str, str, str]],
+    active_incidents: int = 0,
+) -> str:
+    """Build the single pinned status message combining overall status + components.
+
+    Args:
+        indicator: Overall status indicator (none/minor/major/critical)
+        description: Status description from API
+        components: List of (component_id, name, status) tuples
+        active_incidents: Number of active incidents
+    """
+    emoji = INDICATOR_EMOJI.get(indicator, "⚪")
+
+    parts = [f"{emoji} *Claude Status: {_esc(_format_status(indicator))}*"]
+
+    if description:
+        parts.append(f"_{_esc(description)}_")
+
+    # Group components by status
+    status_groups: dict[str, list[str]] = {}
+    for comp_id, name, status in components:
+        if status not in status_groups:
+            status_groups[status] = []
+        status_groups[status].append(name)
+
+    status_order = ["major_outage", "partial_outage", "degraded_performance",
+                    "under_maintenance", "operational"]
+
+    for status in status_order:
+        if status not in status_groups:
+            continue
+        s_emoji = COMPONENT_STATUS_EMOJI.get(status, "⚪")
+        label = _format_status(status)
+        names = sorted(status_groups[status])
+
+        if status == "operational" and len(names) > 2:
+            parts.append(f"\n{s_emoji} *{_esc(label)}:* {_esc(' • '.join(names))}")
+        else:
+            parts.append(f"\n{s_emoji} *{_esc(label)}*")
+            for name in names:
+                parts.append(f"  • {_esc(name)}")
+
+    if active_incidents > 0:
+        parts.append(f"\n🚨 {active_incidents} active incident{'s' if active_incidents > 1 else ''}")
+
+    now = datetime.now(timezone.utc).strftime("%H:%M UTC")
+    parts.append(f"\n_Updated: {_esc(now)}_")
+
+    return "\n".join(parts)
 
 
-async def notify_component_change(name: str, old_status: str, new_status: str):
-    emoji_old = COMPONENT_STATUS_EMOJI.get(old_status, "⚪")
-    emoji_new = COMPONENT_STATUS_EMOJI.get(new_status, "⚪")
-    text = (
-        f"🔄 *Component: {_esc(name)}*\n\n"
-        f"{emoji_old} {_esc(_format_status(old_status))} "
-        f"→ {emoji_new} {_esc(_format_status(new_status))}"
-    )
-    await _send(text)
+async def send_pinned_status(
+    indicator: str, description: str,
+    components: list[tuple[str, str, str]],
+    active_incidents: int = 0,
+) -> dict[str, int]:
+    """Send the combined status message. Returns {chat_id: message_id}."""
+    text = build_pinned_status_message(indicator, description, components, active_incidents)
+    return await _send(text)
+
+
+async def edit_pinned_status(
+    message_ids: dict[str, int],
+    indicator: str, description: str,
+    components: list[tuple[str, str, str]],
+    active_incidents: int = 0,
+) -> bool:
+    """Edit the combined status message. Returns True if at least one succeeded."""
+    text = build_pinned_status_message(indicator, description, components, active_incidents)
+    return await _edit(message_ids, text)
 
 
 def build_component_status_message(components: list[tuple[str, str, str]]) -> str:
@@ -252,14 +304,7 @@ async def edit_component_status(message_ids: dict, components: list[tuple[str, s
 
 
 async def notify_startup(indicator: str, components: list[tuple[str, str]]):
+    """Send a brief startup notification (non-editable, informational only)."""
     emoji = INDICATOR_EMOJI.get(indicator, "⚪")
-    lines = [
-        f"🤖 *Claude Status Bot Started*\n",
-        f"\n{emoji} Overall: {_esc(_format_status(indicator))}\n",
-    ]
-    if components:
-        lines.append("\n*Components:*")
-        for name, status in components:
-            c_emoji = COMPONENT_STATUS_EMOJI.get(status, "⚪")
-            lines.append(f"\n{c_emoji} {_esc(name)}")
-    await _send("\n".join(lines))
+    text = f"🤖 *Claude Status Bot Started* — {emoji} {_esc(_format_status(indicator))}"
+    await _send(text)

@@ -84,6 +84,39 @@ def _incident_updates_tuples(inc: statuspage.Incident) -> list[tuple[str, str, s
     return [(u.status, u.body, u.created_at) for u in inc.incident_updates]
 
 
+async def _update_pinned_status(summary: statuspage.StatusSummary, state: dict) -> dict:
+    """Send or edit the single pinned status message."""
+    component_list = [(c.id, c.name, c.status) for c in summary.components]
+    active_incidents = len(summary.incidents)
+    has_msg = bool(state.get("status_message_ids"))
+
+    if has_msg:
+        success = await notifier.edit_pinned_status(
+            state["status_message_ids"],
+            summary.indicator, summary.description,
+            component_list, active_incidents,
+        )
+        if not success:
+            # Edit failed (message deleted, etc.) — send a new one
+            msg_ids = await notifier.send_pinned_status(
+                summary.indicator, summary.description,
+                component_list, active_incidents,
+            )
+            if msg_ids:
+                state["status_message_ids"] = msg_ids
+                logger.info("Re-created pinned status message in %d chats", len(msg_ids))
+    else:
+        msg_ids = await notifier.send_pinned_status(
+            summary.indicator, summary.description,
+            component_list, active_incidents,
+        )
+        if msg_ids:
+            state["status_message_ids"] = msg_ids
+            logger.info("Created pinned status message in %d chats", len(msg_ids))
+
+    return state
+
+
 async def process_summary(summary: statuspage.StatusSummary, state: dict) -> dict:
     is_first_run = state["indicator"] is None
 
@@ -98,25 +131,13 @@ async def process_summary(summary: statuspage.StatusSummary, state: dict) -> dic
         }
         state["incident_statuses"] = {i.id: i.status for i in summary.incidents}
 
-        # Create component status message if any component is non-operational
-        component_list_full = [(c.id, c.name, c.status) for c in summary.components]
-        has_non_operational = any(c.status != "operational" for c in summary.components)
-        if has_non_operational:
-            msg_ids = await notifier.send_component_status(component_list_full)
-            if msg_ids:
-                state["component_message_ids"] = msg_ids
-                logger.info("Created component status message at startup in %d chats", len(msg_ids))
+        # Send the pinned status message
+        state = await _update_pinned_status(summary, state)
 
         return state
 
-    # Overall status change
-    if summary.indicator != state["indicator"]:
-        await notifier.notify_status_change(
-            state["indicator"], summary.indicator, summary.description
-        )
-        state["indicator"] = summary.indicator
-
-    # Component status changes - track if anything changed
+    # Detect changes
+    indicator_changed = summary.indicator != state["indicator"]
     component_changed = False
     for comp in summary.components:
         old_status = state["components"].get(comp.id)
@@ -125,31 +146,17 @@ async def process_summary(summary: statuspage.StatusSummary, state: dict) -> dic
             logger.info("Component %s: %s -> %s", comp.name, old_status, comp.status)
         state["components"][comp.id] = comp.status
 
-    # Update component status message if any component changed
-    if component_changed:
-        component_list = [(c.id, c.name, c.status) for c in summary.components]
-        has_non_operational = any(c.status != "operational" for c in summary.components)
-        has_message_ids = bool(state.get("component_message_ids"))
+    if indicator_changed:
+        logger.info("Overall status: %s -> %s", state["indicator"], summary.indicator)
+        state["indicator"] = summary.indicator
 
-        if has_message_ids:
-            # Edit existing message
-            success = await notifier.edit_component_status(
-                state["component_message_ids"], component_list
-            )
-            if not success:
-                # Edit failed - send new message
-                new_msg_ids = await notifier.send_component_status(component_list)
-                if new_msg_ids:
-                    state["component_message_ids"] = new_msg_ids
-        elif has_non_operational:
-            # No message yet but components are down - create message
-            msg_ids = await notifier.send_component_status(component_list)
-            if msg_ids:
-                state["component_message_ids"] = msg_ids
-                logger.info("Created component status message in %d chats", len(msg_ids))
+    # Edit pinned status message on any status/component change
+    if indicator_changed or component_changed:
+        state = await _update_pinned_status(summary, state)
 
     # Incidents
     known_ids = set(state["incident_ids"])
+    incidents_changed = False
     for inc in summary.incidents:
         updates_tuples = _incident_updates_tuples(inc)
         known_update_ids = set(state["incident_updates"].get(inc.id, []))
@@ -165,6 +172,7 @@ async def process_summary(summary: statuspage.StatusSummary, state: dict) -> dic
             if msg_ids:
                 state["message_ids"][inc.id] = msg_ids
             logger.info("New incident: %s (sent to %d chats)", inc.name, len(msg_ids))
+            incidents_changed = True
 
         elif has_new_updates or status_changed:
             msg_ids = state.get("message_ids", {}).get(inc.id, {})
@@ -187,9 +195,18 @@ async def process_summary(summary: statuspage.StatusSummary, state: dict) -> dic
                 )
                 if new_msg_ids:
                     state["message_ids"][inc.id] = new_msg_ids
+            incidents_changed = True
 
         state["incident_updates"][inc.id] = current_update_ids
         state["incident_statuses"][inc.id] = inc.status
+
+    # Update pinned message if incident count changed (reflects in "X active incidents")
+    prev_incident_count = state.get("active_incident_count", 0)
+    curr_incident_count = len(summary.incidents)
+    if (incidents_changed or curr_incident_count != prev_incident_count) \
+            and not (indicator_changed or component_changed):
+        state = await _update_pinned_status(summary, state)
+    state["active_incident_count"] = curr_incident_count
 
     return state
 

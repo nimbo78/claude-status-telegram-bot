@@ -16,7 +16,8 @@ _DEFAULT_STATE: dict[str, Any] = {
     "incident_updates": {},     # incident_id -> list of update IDs
     "incident_statuses": {},    # incident_id -> last known status
     "message_ids": {},          # incident_id -> {chat_id: message_id} (for editing)
-    "component_message_ids": {},  # {chat_id: message_id} for component status message
+    "component_message_ids": {},  # DEPRECATED: kept for migration, replaced by status_message_ids
+    "status_message_ids": {},   # {chat_id: message_id} for the single pinned status message
 }
 
 
