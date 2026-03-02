@@ -213,6 +213,7 @@ async def process_summary(summary: statuspage.StatusSummary, state: dict) -> dic
 
 async def poll_task():
     """Background polling task."""
+    logger.info("Poll task started")
     state = storage.load_state()
     while True:
         try:
@@ -229,7 +230,7 @@ async def poll_task():
 
 async def post_init(application):
     """Start polling loop after bot initializes."""
-    asyncio.create_task(poll_task())
+    application.create_task(poll_task(), name="poll_task")
 
 
 def main():
