@@ -17,6 +17,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)],
 )
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger("bot")
 
 
