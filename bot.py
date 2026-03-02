@@ -132,6 +132,16 @@ async def process_summary(summary: statuspage.StatusSummary, state: dict) -> dic
         }
         state["incident_statuses"] = {i.id: i.status for i in summary.incidents}
 
+        # Send notifications for active incidents on first run
+        for inc in summary.incidents:
+            updates_tuples = _incident_updates_tuples(inc)
+            msg_ids = await notifier.send_incident(
+                inc.name, inc.status, inc.impact, inc.shortlink, updates_tuples
+            )
+            if msg_ids:
+                state["message_ids"][inc.id] = msg_ids
+            logger.info("Existing incident: %s (sent to %d chats)", inc.name, len(msg_ids))
+
         # Send the pinned status message
         state = await _update_pinned_status(summary, state)
 
