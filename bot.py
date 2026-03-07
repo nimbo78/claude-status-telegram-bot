@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import sys
+from datetime import datetime, timezone
 
 from telegram import Update, BotDescription
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
@@ -133,6 +134,7 @@ async def process_summary(summary: statuspage.StatusSummary, state: dict) -> dic
         state["incident_statuses"] = {i.id: i.status for i in summary.incidents}
 
         # Send notifications for active incidents on first run
+        now = datetime.now(timezone.utc).isoformat()
         for inc in summary.incidents:
             updates_tuples = _incident_updates_tuples(inc)
             msg_ids = await notifier.send_incident(
@@ -140,6 +142,7 @@ async def process_summary(summary: statuspage.StatusSummary, state: dict) -> dic
             )
             if msg_ids:
                 state["message_ids"][inc.id] = msg_ids
+                state.setdefault("sent_at", {})[inc.id] = now
             logger.info("Existing incident: %s (sent to %d chats)", inc.name, len(msg_ids))
 
         # Send the pinned status message
@@ -182,6 +185,7 @@ async def process_summary(summary: statuspage.StatusSummary, state: dict) -> dic
             state["incident_ids"].append(inc.id)
             if msg_ids:
                 state["message_ids"][inc.id] = msg_ids
+                state.setdefault("sent_at", {})[inc.id] = datetime.now(timezone.utc).isoformat()
             logger.info("New incident: %s (sent to %d chats)", inc.name, len(msg_ids))
             incidents_changed = True
 
@@ -199,6 +203,7 @@ async def process_summary(summary: statuspage.StatusSummary, state: dict) -> dic
                     )
                     if new_msg_ids:
                         state["message_ids"][inc.id] = new_msg_ids
+                        state.setdefault("sent_at", {})[inc.id] = datetime.now(timezone.utc).isoformat()
                 logger.info("Updated incident: %s", inc.name)
             else:
                 new_msg_ids = await notifier.send_incident(
@@ -206,10 +211,62 @@ async def process_summary(summary: statuspage.StatusSummary, state: dict) -> dic
                 )
                 if new_msg_ids:
                     state["message_ids"][inc.id] = new_msg_ids
+                    state.setdefault("sent_at", {})[inc.id] = datetime.now(timezone.utc).isoformat()
             incidents_changed = True
 
         state["incident_updates"][inc.id] = current_update_ids
         state["incident_statuses"][inc.id] = inc.status
+
+    # Refresh long-running incident messages to keep them deletable (48h Telegram limit)
+    now = datetime.now(timezone.utc)
+    if config.MESSAGE_MAX_AGE > 0:
+        for inc in summary.incidents:
+            sent_at_str = state.get("sent_at", {}).get(inc.id)
+            if not sent_at_str:
+                continue
+            msg_age = (now - datetime.fromisoformat(sent_at_str)).total_seconds()
+            if msg_age >= config.MESSAGE_MAX_AGE:
+                old_msg_ids = state.get("message_ids", {}).get(inc.id, {})
+                if old_msg_ids:
+                    await notifier.delete_incident(old_msg_ids)
+                updates_tuples = _incident_updates_tuples(inc)
+                new_msg_ids = await notifier.send_incident(
+                    inc.name, inc.status, inc.impact, inc.shortlink, updates_tuples
+                )
+                if new_msg_ids:
+                    state["message_ids"][inc.id] = new_msg_ids
+                    state["sent_at"][inc.id] = now.isoformat()
+                    logger.info("Refreshed message for long-running incident: %s", inc.name)
+
+    # Detect disappeared incidents and delete messages after grace period
+    if config.DELETE_DELAY > 0:
+        current_ids = {inc.id for inc in summary.incidents}
+
+        # Cancel grace period for reappeared incidents
+        for inc_id in list(state.get("disappeared_at", {}).keys()):
+            if inc_id in current_ids:
+                state["disappeared_at"].pop(inc_id)
+                logger.info("Incident %s reappeared, cancelled deletion", inc_id)
+
+        # Check disappeared incidents
+        disappeared_ids = set(state["incident_ids"]) - current_ids
+        for inc_id in disappeared_ids:
+            if inc_id not in state.get("disappeared_at", {}):
+                state.setdefault("disappeared_at", {})[inc_id] = now.isoformat()
+                logger.info("Incident %s disappeared, grace period started", inc_id)
+            else:
+                elapsed = (now - datetime.fromisoformat(state["disappeared_at"][inc_id])).total_seconds()
+                if elapsed >= config.DELETE_DELAY:
+                    msg_ids = state.get("message_ids", {}).get(inc_id, {})
+                    if msg_ids:
+                        await notifier.delete_incident(msg_ids)
+                    state["message_ids"].pop(inc_id, None)
+                    state["incident_updates"].pop(inc_id, None)
+                    state["incident_statuses"].pop(inc_id, None)
+                    state["disappeared_at"].pop(inc_id, None)
+                    state.get("sent_at", {}).pop(inc_id, None)
+                    logger.info("Deleted incident %s messages, cleaned state", inc_id)
+                    incidents_changed = True
 
     # Update pinned message if incident count changed (reflects in "X active incidents")
     prev_incident_count = state.get("active_incident_count", 0)

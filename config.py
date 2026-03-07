@@ -34,5 +34,12 @@ POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "300"))
 # State file path (inside container: /data/state.json)
 STATE_FILE = os.getenv("STATE_FILE", "/data/state.json")
 
+# Auto-delete resolved incident messages after this delay (seconds). 0 = disabled.
+DELETE_DELAY = int(os.getenv("DELETE_DELAY", "1800"))  # default 30 min
+
+# Proactively refresh incident messages older than this (seconds). 0 = disabled.
+# Keeps messages deletable (Telegram 48h limit). Default 36h.
+MESSAGE_MAX_AGE = int(os.getenv("MESSAGE_MAX_AGE", "129600"))
+
 # Log level
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

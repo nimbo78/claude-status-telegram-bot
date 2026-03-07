@@ -107,6 +107,29 @@ async def _edit(message_ids: dict[str, int], text: str) -> bool:
     return any_success
 
 
+async def _delete(message_ids: dict[str, int]) -> bool:
+    """Delete message in all chats. Returns True if at least one succeeded."""
+    if not config.TELEGRAM_BOT_TOKEN:
+        return False
+    bot = _get_bot()
+    any_success = False
+    for chat_id, msg_id in message_ids.items():
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=msg_id)
+            logger.info("Deleted message %d in %s", msg_id, chat_id)
+            any_success = True
+        except telegram.error.BadRequest as e:
+            logger.warning("Cannot delete message %d in %s: %s", msg_id, chat_id, e)
+        except Exception:
+            logger.exception("Failed to delete message %d in %s", msg_id, chat_id)
+    return any_success
+
+
+async def delete_incident(message_ids: dict[str, int]) -> bool:
+    """Delete an incident message from all chats."""
+    return await _delete(message_ids)
+
+
 def build_incident_message(
     name: str, status: str, impact: str, shortlink: str,
     updates: list[tuple[str, str, str]],

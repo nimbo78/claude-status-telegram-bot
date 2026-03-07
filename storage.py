@@ -18,6 +18,8 @@ _DEFAULT_STATE: dict[str, Any] = {
     "message_ids": {},          # incident_id -> {chat_id: message_id} (for editing)
     "component_message_ids": {},  # DEPRECATED: kept for migration, replaced by status_message_ids
     "status_message_ids": {},   # {chat_id: message_id} for the single pinned status message
+    "disappeared_at": {},       # incident_id -> ISO timestamp (grace period for deletion)
+    "sent_at": {},              # incident_id -> ISO timestamp (message creation time for refresh)
 }
 
 
