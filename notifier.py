@@ -130,6 +130,40 @@ async def delete_incident(message_ids: dict[str, int]) -> bool:
     return await _delete(message_ids)
 
 
+async def message_exists(chat_id, message_id: int) -> bool:
+    """Check if a message still exists by trying to copy it to the same chat
+    with disable_notification. On failure, it means the message was deleted."""
+    if not config.TELEGRAM_BOT_TOKEN:
+        return False
+    bot = _get_bot()
+    try:
+        # copyMessage fails with BadRequest if the message doesn't exist
+        copied = await bot.copy_message(
+            chat_id=chat_id, from_chat_id=chat_id, message_id=message_id,
+            disable_notification=True,
+        )
+        # It worked — message exists. Delete the copy.
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=copied.message_id)
+        except Exception:
+            pass
+        return True
+    except telegram.error.BadRequest:
+        return False
+    except Exception:
+        logger.debug("message_exists check failed for %d in %s", message_id, chat_id)
+        return True  # Assume exists on unknown errors
+
+
+async def validate_message_ids(message_ids: dict[str, int]) -> dict[str, int]:
+    """Check which messages still exist. Returns only valid {chat_id: msg_id}."""
+    valid = {}
+    for chat_id, msg_id in message_ids.items():
+        if await message_exists(chat_id, msg_id):
+            valid[chat_id] = msg_id
+    return valid
+
+
 def build_incident_message(
     name: str, status: str, impact: str, shortlink: str,
     updates: list[tuple[str, str, str]],

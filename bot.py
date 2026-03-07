@@ -164,8 +164,9 @@ async def process_summary(summary: statuspage.StatusSummary, state: dict) -> dic
         logger.info("Overall status: %s -> %s", state["indicator"], summary.indicator)
         state["indicator"] = summary.indicator
 
-    # Edit pinned status message on any status/component change
-    if indicator_changed or component_changed:
+    # Edit pinned status message on any status/component change, or re-create if missing
+    pinned_missing = not state.get("status_message_ids")
+    if indicator_changed or component_changed or pinned_missing:
         state = await _update_pinned_status(summary, state)
 
     # Incidents
@@ -213,6 +214,16 @@ async def process_summary(summary: statuspage.StatusSummary, state: dict) -> dic
                     state["message_ids"][inc.id] = new_msg_ids
                     state.setdefault("sent_at", {})[inc.id] = datetime.now(timezone.utc).isoformat()
             incidents_changed = True
+
+        # Re-send incident if message was deleted (validated on startup)
+        if inc.id in known_ids and not state.get("message_ids", {}).get(inc.id):
+            new_msg_ids = await notifier.send_incident(
+                inc.name, inc.status, inc.impact, inc.shortlink, updates_tuples
+            )
+            if new_msg_ids:
+                state["message_ids"][inc.id] = new_msg_ids
+                state.setdefault("sent_at", {})[inc.id] = datetime.now(timezone.utc).isoformat()
+                logger.info("Re-sent deleted incident message: %s", inc.name)
 
         state["incident_updates"][inc.id] = current_update_ids
         state["incident_statuses"][inc.id] = inc.status
@@ -279,10 +290,52 @@ async def process_summary(summary: statuspage.StatusSummary, state: dict) -> dic
     return state
 
 
+async def _validate_messages_on_startup(state: dict) -> dict:
+    """Check that stored message IDs still exist in Telegram.
+    Re-send any that were deleted by the user."""
+    if state["indicator"] is None:
+        return state  # first run, nothing to validate
+
+    # Validate pinned status message
+    pinned_ids = state.get("status_message_ids", {})
+    if pinned_ids:
+        valid = await notifier.validate_message_ids(pinned_ids)
+        if len(valid) < len(pinned_ids):
+            logger.info("Pinned status message missing in %d chat(s), will re-create",
+                        len(pinned_ids) - len(valid))
+            state["status_message_ids"] = {}  # force re-creation on next process_summary
+
+    # Validate incident messages
+    now = datetime.now(timezone.utc).isoformat()
+    for inc_id, msg_ids in list(state.get("message_ids", {}).items()):
+        if not msg_ids:
+            continue
+        valid = await notifier.validate_message_ids(msg_ids)
+        if len(valid) < len(msg_ids):
+            missing_count = len(msg_ids) - len(valid)
+            logger.info("Incident %s message missing in %d chat(s), clearing for re-send",
+                        inc_id, missing_count)
+            if valid:
+                state["message_ids"][inc_id] = valid
+            else:
+                state["message_ids"].pop(inc_id, None)
+                state.get("sent_at", {}).pop(inc_id, None)
+
+    storage.save_state(state)
+    return state
+
+
 async def poll_task():
     """Background polling task."""
     logger.info("Poll task started")
     state = storage.load_state()
+
+    # Validate existing messages on startup
+    try:
+        state = await _validate_messages_on_startup(state)
+    except Exception:
+        logger.exception("Error validating messages on startup")
+
     while True:
         try:
             summary = await statuspage.fetch_summary()
